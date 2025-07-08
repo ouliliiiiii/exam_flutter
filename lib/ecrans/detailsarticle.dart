@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import '../models/article.dart';
 import '../models/commentaire.dart';
 import '../services/api.dart';
+import '../services/commentaireservice.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../services/db_helper.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class DetailsArticle extends StatefulWidget {
   final Article article;
@@ -16,36 +18,50 @@ class DetailsArticle extends StatefulWidget {
 
 class _DetailsArticleState extends State<DetailsArticle> {
   final Api api = Api();
-  final DbHelper dbHelper = DbHelper();
   List<Commentaire> commentaires = [];
-  Set<int> expandedComments = {};
 
-  /////////////////je charge ici les commentaires
+  // Gère les commentaires dont on affiche les réponses
+  Set<int> commentairesAvecReponsesVisibles = {};
+
+  // Gère les textes complets affichés (pour "Lire la suite")
+  Set<int> commentairesAvecTexteComplet = {};
+
+  // Gère affichage complet du texte de l'article
+  bool articleTexteComplet = false;
+
+  final int maxLinesPreview = 3;
+
   @override
   void initState() {
     super.initState();
-    fetchCommentaires();
+    fetchCommentaires(widget.article.id);
   }
 
-  /////////////////je recupere les commentaires
-  Future<void> fetchCommentaires() async {
-    if (widget.article.id_com == null) return;
+  Future<void> fetchCommentaires(int articleId) async {
+    final url = 'https://hacker-news.firebaseio.com/v0/item/$articleId.json';
+    final response = await http.get(Uri.parse(url));
 
-    List<Commentaire> loaded = [];
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final List<int> commentIds = (data['kids'] as List?)?.cast<int>() ?? [];
 
-    for (var id in widget.article.id_com!) {
-      final c = await api.fetchCommentWithReplies(id);
-      if (c != null) loaded.add(c);
+      final commentaires = await CommentaireService.getCommentaires(commentIds);
+
+      if (!mounted) return;
+      setState(() {
+        this.commentaires = commentaires;
+      });
+    } else {
+      throw Exception("Erreur chargement article $articleId");
     }
-
-    setState(() {
-      commentaires = loaded;
-    });
   }
 
-  //////////////////et je les affiche ici
   Widget buildComment(Commentaire com, {int depth = 0}) {
-    final isExpanded = expandedComments.contains(com.id);
+    final texteNettoye = (com.texte ?? '').replaceAll(RegExp(r'<[^>]*>'), '');
+    final bool showFullText = commentairesAvecTexteComplet.contains(com.id);
+    final bool isLongText = texteNettoye.length > 150;
+
+    bool showReplies = commentairesAvecReponsesVisibles.contains(com.id);
 
     return Padding(
       padding: EdgeInsets.only(left: depth * 16.0, top: 8, bottom: 8),
@@ -56,23 +72,55 @@ class _DetailsArticleState extends State<DetailsArticle> {
             color: Colors.grey[100],
             child: ListTile(
               title: Text(com.auteur ?? 'Anonyme'),
-              subtitle: Text(
-                com.texte?.replaceAll(RegExp(r'<[^>]*>'), '') ?? '',
-                style: const TextStyle(fontSize: 14),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    texteNettoye,
+                    maxLines: showFullText ? null : maxLinesPreview,
+                    overflow: showFullText
+                        ? TextOverflow.visible
+                        : TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  if (isLongText)
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          if (showFullText) {
+                            commentairesAvecTexteComplet.remove(com.id);
+                          } else {
+                            commentairesAvecTexteComplet.add(com.id);
+                          }
+                        });
+                      },
+                      child: Text(showFullText ? 'Réduire' : 'Lire la suite'),
+                    ),
+                ],
               ),
             ),
           ),
-
-          if (com.reponses.isNotEmpty && !isExpanded)
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  expandedComments.add(com.id);
-                });
-              },
-              child: const Text("Voir les réponses"),
+          if (com.reponses.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 16.0),
+              child: TextButton(
+                onPressed: () {
+                  setState(() {
+                    if (showReplies) {
+                      commentairesAvecReponsesVisibles.remove(com.id);
+                    } else {
+                      commentairesAvecReponsesVisibles.add(com.id);
+                    }
+                  });
+                },
+                child: Text(
+                  showReplies
+                      ? 'Cacher les réponses (${com.reponses.length})'
+                      : 'Voir les réponses (${com.reponses.length})',
+                ),
+              ),
             ),
-          if (isExpanded)
+          if (showReplies)
             ...com.reponses
                 .map((rep) => buildComment(rep, depth: depth + 1))
                 .toList(),
@@ -81,35 +129,16 @@ class _DetailsArticleState extends State<DetailsArticle> {
     );
   }
 
-  /////////////enregistrer l article que je veux dans ma base
-  Future<void> enregistrerArticle() async {
-    final existing = await dbHelper.getArticle(widget.article.id);
-
-    if (existing != null) {
-      // L'article est déjà en base
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Article déjà enregistré'),
-          duration: Duration(seconds: 5),
-          backgroundColor: Colors.orangeAccent,
-        ),
-      );
-      return;
-    }
-    await dbHelper.insertArticle(widget.article);
-    await dbHelper.insertCommentaires(commentaires, widget.article.id);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Article enregistré avec succès'),
-        duration: Duration(seconds: 5),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    final texteNettoye = (widget.article.texte ?? '').replaceAll(
+      RegExp(r'<[^>]*>'),
+      '',
+    );
+    final bool articleHasText = texteNettoye.isNotEmpty;
+
+    final bool showArticleFullText = articleTexteComplet || !articleHasText;
+
     return Scaffold(
       appBar: AppBar(title: Text(widget.article.titre)),
       body: ListView(
@@ -123,18 +152,47 @@ class _DetailsArticleState extends State<DetailsArticle> {
           Text('Auteur : ${widget.article.auteur ?? "Neant"}'),
           const SizedBox(height: 8),
 
-          //////////le lien si l article  n est pas dispo
-          if ((widget.article.url != null && widget.article.url!.isNotEmpty) &&
-              (widget.article.texte == null || widget.article.texte!.isEmpty))
+          if (articleHasText)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  texteNettoye,
+                  maxLines: articleTexteComplet ? null : maxLinesPreview,
+                  overflow: articleTexteComplet
+                      ? TextOverflow.visible
+                      : TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 16),
+                ),
+                if (texteNettoye.length > 150)
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        articleTexteComplet = !articleTexteComplet;
+                      });
+                    },
+                    child: Text(
+                      articleTexteComplet ? 'Réduire' : 'Lire la suite',
+                    ),
+                  ),
+              ],
+            ),
+
+          const SizedBox(height: 12),
+
+          if (commentaires.isEmpty &&
+              widget.article.url != null &&
+              widget.article.url!.trim().isNotEmpty &&
+              widget.article.url! != "null")
             TextButton(
               onPressed: () async {
-                final url = Uri.parse(widget.article.url!);
-                if (await canLaunchUrl(url)) {
-                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                final uri = Uri.tryParse(widget.article.url!);
+                if (uri != null && await canLaunchUrl(uri)) {
+                  await launchUrl(uri);
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Impossible d’ouvrir le lien'),
+                      content: Text("Impossible d'ouvrir le lien."),
                     ),
                   );
                 }
@@ -149,8 +207,15 @@ class _DetailsArticleState extends State<DetailsArticle> {
           ),
           const SizedBox(height: 10),
 
-          //////////////////Liste des autres commentaires
-          ...commentaires.map((c) => buildComment(c)).toList(),
+          if (commentaires.isEmpty)
+            const Center(
+              child: Text(
+                "Aucun commentaire à afficher.",
+                style: TextStyle(fontStyle: FontStyle.italic),
+              ),
+            )
+          else
+            ...commentaires.map((c) => buildComment(c)).toList(),
         ],
       ),
     );

@@ -21,7 +21,7 @@ class DbHelper {
 
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE articles (
@@ -29,7 +29,8 @@ class DbHelper {
             titre TEXT,
             auteur TEXT,
             nbre_commentaire INTEGER,
-            url TEXT
+            url TEXT,
+            texte TEXT
           )
         ''');
 
@@ -43,6 +44,11 @@ class DbHelper {
             FOREIGN KEY (id_article) REFERENCES articles (id)
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('ALTER TABLE articles ADD COLUMN texte TEXT');
+        }
       },
     );
   }
@@ -84,6 +90,7 @@ class DbHelper {
         auteur: data['auteur'] as String?,
         nbre_commentaire: data['nbre_commentaire'] as int?,
         url: data['url'] as String?,
+        texte: data['texte'] as String?,
         id_com: [],
       );
     }

@@ -28,7 +28,7 @@ class Article {
       auteur: json['by'],
       nbre_commentaire: json['descendants'],
       url: json['url'],
-      id_com: (json['kids'] as List?)?.cast<int>(),
+      id_com: (json['kids'] as List<dynamic>?)?.map((e) => e as int).toList(),
       texte: json['text'],
     );
   }
@@ -40,6 +40,7 @@ class Article {
       'auteur': auteur,
       'nbre_commentaire': nbre_commentaire,
       'url': url,
+      'texte': texte,
     };
   }
 }

@@ -35,7 +35,7 @@ class _AccueilState extends State<Accueil> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Hacker News')),
+      appBar: AppBar(title: const Text('Articles')),
       body: ListView.builder(
         itemCount: articles.length,
         itemBuilder: (context, index) {
@@ -45,6 +45,8 @@ class _AccueilState extends State<Accueil> {
             subtitle: Text(article.auteur ?? ''),
             trailing: Text('${article.nbre_commentaire ?? 0} comments'),
             onTap: () {
+              print('Titre: ${article.titre}');
+              print('ID commentaires: ${article.id_com}');
               Navigator.push(
                 context,
                 MaterialPageRoute(

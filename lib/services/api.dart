@@ -17,19 +17,12 @@ class Api {
   }
 
   Future<Article?> fetchArticle(int id) async {
-    //////////////si l'article existe
-    final localArticle = await _dbHelper.getArticle(id);
-    if (localArticle != null) {
-      print('Article chargé depuis la base locale');
-      return localArticle;
-    }
-
-    /////////////Sinon récupère l'article
+    // Ne pas chercher dans la base locale, charger toujours depuis l'API
     final response = await http.get(Uri.parse('$_baseUrl/item/$id.json'));
     if (response.statusCode == 200) {
       final article = Article.fromJson(json.decode(response.body));
 
-      //////enregistrement de  l'article dns la base
+      // Sauvegarder en local si tu veux garder la copie
       await _dbHelper.insertArticle(article);
 
       print('Article chargé depuis l\'API et sauvegardé localement');
