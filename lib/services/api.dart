@@ -5,44 +5,45 @@ import '../models/commentaire.dart';
 import 'db_helper.dart';
 
 class Api {
-  static const _baseUrl = 'https://hacker-news.firebaseio.com/v0';
+  static const String _baseUrl = 'https://hacker-news.firebaseio.com/v0';
   final DbHelper _dbHelper = DbHelper();
 
+  /// Récupère la liste des IDs des top stories
   Future<List<int>> fetchTopStories() async {
     final response = await http.get(Uri.parse('$_baseUrl/topstories.json'));
     if (response.statusCode == 200) {
       return List<int>.from(json.decode(response.body));
+    } else {
+      print('Erreur lors du chargement des top stories');
+      return [];
     }
-    return [];
   }
 
+  /// Récupère un article depuis la base locale, sinon via l'API
   Future<Article?> fetchArticle(int id) async {
-    //////////////si l'article existe
+    // Vérifier en local
     final localArticle = await _dbHelper.getArticle(id);
     if (localArticle != null) {
-      print('Article chargé depuis la base locale');
+      print('Article $id chargé depuis la base locale');
       return localArticle;
     }
 
-    /////////////Sinon récupère l'article
+    // Sinon charger depuis API
     final response = await http.get(Uri.parse('$_baseUrl/item/$id.json'));
     if (response.statusCode == 200) {
       final article = Article.fromJson(json.decode(response.body));
-
-      //////enregistrement de  l'article dns la base
       await _dbHelper.insertArticle(article);
-
-      print('Article chargé depuis l\'API et sauvegardé localement');
+      print('Article $id chargé depuis l\'API et sauvegardé localement');
       return article;
+    } else {
+      print('Erreur de chargement article $id');
+      return null;
     }
-    return null;
   }
 
-  ///////////////recuperation des commentaires
+  /// Récupère un commentaire et ses réponses récursivement
   Future<Commentaire?> fetchCommentWithReplies(int id) async {
-    final response = await http.get(
-      Uri.parse('https://hacker-news.firebaseio.com/v0/item/$id.json'),
-    );
+    final response = await http.get(Uri.parse('$_baseUrl/item/$id.json'));
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
@@ -53,18 +54,31 @@ class Api {
         final List<Commentaire> replies = [];
 
         for (int childId in commentaire.enfants_com!) {
-          final child = await fetchCommentWithReplies(childId);
-          if (child != null) {
-            replies.add(child);
-          }
+          final reply = await fetchCommentWithReplies(childId);
+          if (reply != null) replies.add(reply);
         }
 
         commentaire.reponses = replies;
       }
 
       return commentaire;
+    } else {
+      print('Erreur chargement commentaire $id');
+      return null;
+    }
+  }
+
+  /// Récupère une liste de commentaires à partir d'une liste d'IDs
+  Future<List<Commentaire>> fetchCommentaires(List<int> ids) async {
+    final List<Commentaire> commentaires = [];
+
+    for (int id in ids) {
+      final commentaire = await fetchCommentWithReplies(id);
+      if (commentaire != null) {
+        commentaires.add(commentaire);
+      }
     }
 
-    return null;
+    return commentaires;
   }
 }
