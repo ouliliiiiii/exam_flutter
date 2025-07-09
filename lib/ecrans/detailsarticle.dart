@@ -6,6 +6,7 @@ import '../services/commentaireservice.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../services/db_helper.dart';
 
 class DetailsArticle extends StatefulWidget {
   final Article article;
@@ -19,22 +20,18 @@ class DetailsArticle extends StatefulWidget {
 class _DetailsArticleState extends State<DetailsArticle> {
   final Api api = Api();
   List<Commentaire> commentaires = [];
-
-  // Gère les commentaires dont on affiche les réponses
+  late bool isFavori;
+  final DbHelper _dbHelper = DbHelper();
   Set<int> commentairesAvecReponsesVisibles = {};
-
-  // Gère les textes complets affichés (pour "Lire la suite")
   Set<int> commentairesAvecTexteComplet = {};
-
-  // Gère affichage complet du texte de l'article
   bool articleTexteComplet = false;
-
   final int maxLinesPreview = 3;
 
   @override
   void initState() {
     super.initState();
     fetchCommentaires(widget.article.id);
+    isFavori = widget.article.isFavori;
   }
 
   Future<void> fetchCommentaires(int articleId) async {
@@ -46,7 +43,6 @@ class _DetailsArticleState extends State<DetailsArticle> {
       final List<int> commentIds = (data['kids'] as List?)?.cast<int>() ?? [];
 
       final commentaires = await CommentaireService.getCommentaires(commentIds);
-
       if (!mounted) return;
       setState(() {
         this.commentaires = commentaires;
@@ -60,71 +56,65 @@ class _DetailsArticleState extends State<DetailsArticle> {
     final texteNettoye = (com.texte ?? '').replaceAll(RegExp(r'<[^>]*>'), '');
     final bool showFullText = commentairesAvecTexteComplet.contains(com.id);
     final bool isLongText = texteNettoye.length > 150;
-
     bool showReplies = commentairesAvecReponsesVisibles.contains(com.id);
 
     return Padding(
       padding: EdgeInsets.only(left: depth * 16.0, top: 8, bottom: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Card(
-            color: Colors.grey[100],
-            child: ListTile(
-              title: Text(com.auteur ?? 'Anonyme'),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    texteNettoye,
-                    maxLines: showFullText ? null : maxLinesPreview,
-                    overflow: showFullText
-                        ? TextOverflow.visible
-                        : TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                  if (isLongText)
-                    TextButton(
-                      onPressed: () {
-                        setState(() {
-                          if (showFullText) {
-                            commentairesAvecTexteComplet.remove(com.id);
-                          } else {
-                            commentairesAvecTexteComplet.add(com.id);
-                          }
-                        });
-                      },
-                      child: Text(showFullText ? 'Réduire' : 'Lire la suite'),
-                    ),
-                ],
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                com.auteur ?? 'Anonyme',
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-            ),
-          ),
-          if (com.reponses.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 16.0),
-              child: TextButton(
-                onPressed: () {
-                  setState(() {
-                    if (showReplies) {
-                      commentairesAvecReponsesVisibles.remove(com.id);
-                    } else {
-                      commentairesAvecReponsesVisibles.add(com.id);
-                    }
-                  });
-                },
-                child: Text(
-                  showReplies
-                      ? 'Cacher les réponses (${com.reponses.length})'
-                      : 'Voir les réponses (${com.reponses.length})',
+              const SizedBox(height: 4),
+              Text(
+                texteNettoye,
+                maxLines: showFullText ? null : maxLinesPreview,
+                overflow: showFullText
+                    ? TextOverflow.visible
+                    : TextOverflow.ellipsis,
+              ),
+              if (isLongText)
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      if (showFullText) {
+                        commentairesAvecTexteComplet.remove(com.id);
+                      } else {
+                        commentairesAvecTexteComplet.add(com.id);
+                      }
+                    });
+                  },
+                  child: Text(showFullText ? 'Réduire' : 'Lire la suite'),
                 ),
-              ),
-            ),
-          if (showReplies)
-            ...com.reponses
-                .map((rep) => buildComment(rep, depth: depth + 1))
-                .toList(),
-        ],
+              if (com.reponses.isNotEmpty)
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      if (showReplies) {
+                        commentairesAvecReponsesVisibles.remove(com.id);
+                      } else {
+                        commentairesAvecReponsesVisibles.add(com.id);
+                      }
+                    });
+                  },
+                  child: Text(
+                    showReplies
+                        ? 'Cacher les réponses (${com.reponses.length})'
+                        : 'Voir les réponses (${com.reponses.length})',
+                  ),
+                ),
+              if (showReplies)
+                ...com.reponses
+                    .map((rep) => buildComment(rep, depth: depth + 1))
+                    .toList(),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -137,67 +127,104 @@ class _DetailsArticleState extends State<DetailsArticle> {
     );
     final bool articleHasText = texteNettoye.isNotEmpty;
 
-    final bool showArticleFullText = articleTexteComplet || !articleHasText;
-
     return Scaffold(
-      appBar: AppBar(title: Text(widget.article.titre)),
+      appBar: AppBar(
+        title: Text(widget.article.titre),
+        actions: [
+          IconButton(
+            icon: Icon(
+              isFavori ? Icons.star : Icons.star_border,
+              color: Colors.amberAccent,
+              size: 28,
+            ),
+            onPressed: () async {
+              setState(() {
+                isFavori = !isFavori;
+              });
+              await _dbHelper.updateFavori(widget.article.id, isFavori);
+            },
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(12.0),
         children: [
-          Text(
-            widget.article.titre,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Text(
+                widget.article.titre,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: 8),
-          Text('Auteur : ${widget.article.auteur ?? "Neant"}'),
-          const SizedBox(height: 8),
+          Text("Auteur : ${widget.article.auteur ?? "Inconnu"}"),
+          const SizedBox(height: 12),
 
           if (articleHasText)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  texteNettoye,
-                  maxLines: articleTexteComplet ? null : maxLinesPreview,
-                  overflow: articleTexteComplet
-                      ? TextOverflow.visible
-                      : TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 16),
-                ),
-                if (texteNettoye.length > 150)
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        articleTexteComplet = !articleTexteComplet;
-                      });
-                    },
-                    child: Text(
-                      articleTexteComplet ? 'Réduire' : 'Lire la suite',
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      texteNettoye,
+                      maxLines: articleTexteComplet ? null : maxLinesPreview,
+                      overflow: articleTexteComplet
+                          ? TextOverflow.visible
+                          : TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 16),
                     ),
-                  ),
-              ],
+                    if (texteNettoye.length > 150)
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            articleTexteComplet = !articleTexteComplet;
+                          });
+                        },
+                        child: Text(
+                          articleTexteComplet ? 'Réduire' : 'Lire la suite',
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
-
-          const SizedBox(height: 12),
 
           if (commentaires.isEmpty &&
               widget.article.url != null &&
               widget.article.url!.trim().isNotEmpty &&
               widget.article.url! != "null")
-            TextButton(
-              onPressed: () async {
-                final uri = Uri.tryParse(widget.article.url!);
-                if (uri != null && await canLaunchUrl(uri)) {
-                  await launchUrl(uri);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text("Impossible d'ouvrir le lien."),
-                    ),
-                  );
-                }
-              },
-              child: const Text("Voir l'article au complet"),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  final uri = Uri.tryParse(widget.article.url!);
+                  if (uri != null && await canLaunchUrl(uri)) {
+                    await launchUrl(uri);
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Impossible d'ouvrir le lien."),
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.open_in_new),
+                label: const Text("Voir l'article complet"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
             ),
 
           const Divider(),
