@@ -218,7 +218,7 @@ class _DetailsArticleState extends State<DetailsArticle> {
                 icon: const Icon(Icons.open_in_new),
                 label: const Text("Voir l'article complet"),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.indigo,
+                  backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
